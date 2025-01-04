@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:todo_app/models/todo_item.dart';
+import '../models/todo_item.dart';
+import '../services/todo_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,6 +16,22 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _newTodoController = TextEditingController();
   final FocusNode _newTodoFocus = FocusNode();
   bool isCreatingNew = false;
+  final TodoService _todoService = TodoService();
+  bool _keyboardHandler(KeyEvent event) {
+    if (event is KeyDownEvent && !isCreatingNew) {
+      if (event.logicalKey == LogicalKeyboardKey.keyT) {
+        setState(() => currentList = 'today');
+      } else if (event.logicalKey == LogicalKeyboardKey.keyS) {
+        setState(() => currentList = 'short_term');
+      } else if (event.logicalKey == LogicalKeyboardKey.keyL) {
+        setState(() => currentList = 'long_term');
+      } else if (event.logicalKey == LogicalKeyboardKey.keyC) {
+        setState(() => isCreatingNew = true);
+        _newTodoFocus.requestFocus();
+      }
+    }
+    return false;
+  }
 
   @override
   void initState() {
@@ -23,39 +40,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _setupKeyboardListeners() {
-    RawKeyboard.instance.addListener((RawKeyEvent event) {
-      if (event is RawKeyDownEvent) {
-        if (!isCreatingNew) {
-          if (event.logicalKey == LogicalKeyboardKey.keyT) {
-            setState(() => currentList = 'today');
-          } else if (event.logicalKey == LogicalKeyboardKey.keyS) {
-            setState(() => currentList = 'short_term');
-          } else if (event.logicalKey == LogicalKeyboardKey.keyL) {
-            setState(() => currentList = 'long_term');
-          } else if (event.logicalKey == LogicalKeyboardKey.keyC) {
-            setState(() => isCreatingNew = true);
-            _newTodoFocus.requestFocus();
-          }
-        }
-      }
-    });
+    HardwareKeyboard.instance.addHandler(_keyboardHandler);
   }
 
   Future<void> _addTodoItem(String title) async {
     if (title.trim().isEmpty) return;
-
-    final todoItem = TodoItem(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      title: title,
-      listType: currentList,
-      createdAt: DateTime.now(),
-    );
-
-    await FirebaseFirestore.instance
-        .collection('todos')
-        .doc(todoItem.id)
-        .set(todoItem.toMap());
-
+    
+    print('Adding todo to list: $currentList');
+    
+    await _todoService.addTodo(title, currentList);
     setState(() {
       isCreatingNew = false;
       _newTodoController.clear();
@@ -90,25 +83,19 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('todos')
-                    .where('listType', isEqualTo: currentList)
-                    .orderBy('createdAt', descending: true)
-                    .snapshots(),
+              child: StreamBuilder<List<TodoItem>>(
+                stream: _todoService.getTodos(currentList),
                 builder: (context, snapshot) {
                   if (snapshot.hasError) {
-                    return const Text('Something went wrong');
+                    print('Stream error: ${snapshot.error}');
+                    return Text('Something went wrong ${snapshot.error}');
                   }
 
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const CircularProgressIndicator();
                   }
 
-                  final todos = snapshot.data!.docs.map((doc) {
-                    return TodoItem.fromMap(
-                        doc.data() as Map<String, dynamic>);
-                  }).toList();
+                  final todos = snapshot.data!;
 
                   return ListView.builder(
                     itemCount: todos.length,
@@ -118,12 +105,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         title: Text(todo.title),
                         trailing: IconButton(
                           icon: const Icon(Icons.delete),
-                          onPressed: () {
-                            FirebaseFirestore.instance
-                                .collection('todos')
-                                .doc(todo.id)
-                                .delete();
-                          },
+                          onPressed: () => _todoService.deleteTodo(todo.id),
                         ),
                       );
                     },
@@ -143,15 +125,13 @@ class _HomeScreenState extends State<HomeScreen> {
         onTap: () => setState(() => currentList = listType),
         child: Container(
           padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: currentList == listType ? Colors.blue : Colors.grey[200],
-            borderRadius: BorderRadius.circular(4),
-          ),
           child: Text(
             title,
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: currentList == listType ? Colors.white : Colors.black,
+              decoration: currentList == listType ? TextDecoration.underline : TextDecoration.none,
+              decorationColor: Colors.black,
+              decorationThickness: 2,
             ),
           ),
         ),
@@ -161,6 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_keyboardHandler);
     _newTodoController.dispose();
     _newTodoFocus.dispose();
     super.dispose();

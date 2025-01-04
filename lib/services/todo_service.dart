@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:todo_app/models/todo_item.dart';
-import 'package:todo_app/services/auth_service.dart';
+import '../models/todo_item.dart';
+import 'auth_service.dart';
 
 class TodoService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -11,6 +11,9 @@ class TodoService {
     final userId = _authService.currentUser?.uid;
     if (userId == null) return Stream.value([]);
 
+    // Add print statements for debugging
+    print('Fetching todos for user: $userId, listType: $listType');
+    
     return _firestore
         .collection('users')
         .doc(userId)
@@ -19,10 +22,11 @@ class TodoService {
         .orderBy('createdAt', descending: true)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => TodoItem.fromMap(doc.data()))
-          .toList();
-    });
+          print('Received ${snapshot.docs.length} todos');
+          return snapshot.docs
+              .map((doc) => TodoItem.fromMap(doc.data()))
+              .toList();
+        });
   }
 
   // Add todo
